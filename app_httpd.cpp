@@ -237,25 +237,45 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 static esp_err_t index_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   String page = "";
-  page += "<!DOCTYPE html><html lang='ru'><head><meta charset='UTF-8'><title>Управление</title><meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>";
-  page += "<style> body { background: #111; margin: 0; height: 100vh; display: flex; flex-direction: column; align-items: center; color: #0f0; font-family: Arial, sans-serif; } #pad-wrapper { flex: 1;";
-  page += "width: 100%; display: flex; justify-content: center; align-items: center; } #pad { background: #222; border: 3px solid #0f0; border-radius: 14px; touch-action: none; position: relative; }";
-  page += "#dot { width: 32px; height: 32px; background: red; border-radius: 50%; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }";
-  page += ".switch { height: 12vh; min-height: 70px; display: flex; align-items: center; gap: 14px; font-size: 22px; } .switch input { width: 64px; height: 34px; } </style></head><body>";
-  page += "<p align=center><IMG SRC='http://" + WiFiAddr + ":81/stream' style='width:300px; transform:rotate(0deg);'></p><br/><div id='pad-wrapper'><div id='pad'><div id='dot'></div></div></div>";
-  page += "<div class='switch'><label>Свет</label><input type='checkbox' id='lightSwitch'></div><script>var xhttp = new XMLHttpRequest(); var start = Date.now();</script><script>function getsend(arg) { xhttp.open('GET', arg +'?' + new Date().getTime(), true); xhttp.send() } </script><script>const pad = document.getElementById('pad');const dot = document.getElementById('dot');const lightSwitch = document.getElementById('lightSwitch');";
-  page += "const ESP_URL = 'http://" + WiFiAddr + "'; let lastSend = 0; const SEND_INTERVAL = 40; function resizePad() { const switchHeight = document.querySelector('.switch').offsetHeight; ";
-  page += "const size = Math.min(window.innerWidth * 0.96, (window.innerHeight - switchHeight) * 0.96); pad.style.width = size + 'px'; pad.style.height = size + 'px'; }";
-  page += "window.addEventListener('resize', resizePad); resizePad(); pad.addEventListener('touchstart', handleTouch); pad.addEventListener('touchmove', handleTouch);";
-  page += "pad.addEventListener('touchend', resetCenter); pad.addEventListener('touchcancel', resetCenter); function handleTouch(e) { e.preventDefault();  const touch = e.touches[0];  if (!touch) return;";
-  page += "const rect = pad.getBoundingClientRect(); let x = touch.clientX - rect.left; let y = touch.clientY - rect.top; x = Math.max(0, Math.min(x, rect.width)); y = Math.max(0, Math.min(y, rect.height));";
-  page += "let xPercent = Math.round((x / rect.width) * 200) - 100; let yPercent = Math.round((y / rect.height) * 200) - 100; let angle = -90 + Math.atan2(xPercent, yPercent) * 180 / Math.PI; if (angle < 0) { angle += 360; }";
-  page += "let accel = -yPercent * 1.5; let xRes = accel;  let yRes = accel;if(xPercent < -10){ yRes  *= (100 + xPercent)/ 100;}else if(xPercent > 10){xRes  *= (100 - xPercent)/ 100;} xRes += 150; yRes += 150;";
-  page += "dot.style.left = x + 'px'; dot.style.top = y + 'px'; throttledSend(Math.round(xRes),Math.round( yRes)); } function resetCenter() { const rect = pad.getBoundingClientRect(); dot.style.left = (rect.width / 2) + 'px';";
-  page += "dot.style.top = (rect.height / 2) + 'px'; sendGet(150, 150, Date.now()-start); } lightSwitch.addEventListener('change', () => { sendLight(lightSwitch.checked ? 'on' : 'off'); });";
-  page += "function throttledSend(x, y) { const now = Date.now(); if (now - lastSend > SEND_INTERVAL) { sendGet(x, y, now-start); lastSend = now; } } function sendGet(x, y, n) { fetch(`${ESP_URL}/go?left=${x}&right=${y}&now=${n}`).catch(() => {sendGet(x, y, n);});";
-  page += "} function sendLight(state) { if(state == 'on'){  fetch(`${ESP_URL}/ledon`).catch(() => {}); }  else{  fetch(`${ESP_URL}/ledoff`).catch(() => {});  }}</script></body></html>";
+  page += "<!DOCTYPE html><html lang='ru'><head><meta charset='UTF-8'><title>Управление</title>";
+  page += "<meta name='viewport' content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'>";
+  page += "<style>";
+  page += "html, body{margin:0;padding:0;width:100%;height:100%;background:#111;overflow:hidden;touch-action:none;color:#0f0;font-family:Arial,sans-serif;}";
+  page += "#main{display:flex;width:100vw;height:100%;}";
+  page += ".track{width:15vw;height:100%;background:#222;border:2px solid #0f0;position:relative;touch-action:none;box-sizing:border-box;}";
+  page += ".center-line{position:absolute;top:50%;left:0;right:0;height:2px;background:#0f0;opacity:0.3;}";
+  page += ".fill{position:absolute;left:0;right:0;}";
+  page += ".fill.up{bottom:50%;background:#0f0;}";
+  page += ".fill.down{top:50%;background:red;}";
+  page += ".value{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:22px;}";
+  page += "#center{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;}";
+  page += "#center img{max-width:100%;max-height:calc(100% - 60px);border:3px solid #0f0;}";
+  page += ".switch{margin-top:6px;font-size:18px;}";
+  page += ".switch input{width:60px;height:30px;}";
+  page += "</style></head><body>";
+  
+  page += "<div id='main'>";
+  page += "<div id='leftTrack' class='track'><div class='value' id='leftVal'>0</div><div class='center-line'></div><div class='fill up' id='leftUp'></div><div class='fill down' id='leftDown'></div></div>";
+  page += "<div id='center'><img src='http://" + WiFiAddr + ":81/stream'><div class='switch'><label>Свет</label><input type='checkbox' id='lightSwitch'></div></div>";
+  page += "<div id='rightTrack' class='track'><div class='value' id='rightVal'>0</div><div class='center-line'></div><div class='fill up' id='rightUp'></div><div class='fill down' id='rightDown'></div></div>";
+  page += "</div>";
 
+  // JS-контроллер с мультитачем и отправкой на ESP
+  page += "<script>";
+  page += "function fixHeight(){document.body.style.height=window.innerHeight+'px';} window.addEventListener('resize',fixHeight); window.addEventListener('orientationchange',fixHeight); fixHeight();";
+  page += "const ESP_URL='http://" + WiFiAddr + "'; const MAX=150;";
+  page += "let leftPower=0,rightPower=0,leftTouchId=null,rightTouchId=null;";
+  page += "function calcPower(y,height){let percent=1-y/height;let value=Math.round(percent*MAX*2-MAX);return Math.max(-MAX,Math.min(MAX,value));}";
+  page += "function updateUI(side,value,height){const up=document.getElementById(side+'Up');const down=document.getElementById(side+'Down');const val=document.getElementById(side+'Val');val.textContent=value;up.style.height=down.style.height='0px';const px=Math.abs(value)/MAX*(height/2);if(value>0)up.style.height=px+'px';if(value<0)down.style.height=px+'px';}";
+  page += "function send(){fetch(`${ESP_URL}/go?left=${leftPower}&right=${rightPower}`).catch(()=>{});}";
+  page += "function handleTouch(t,el,side){const r=el.getBoundingClientRect();const y=Math.max(0,Math.min(t.clientY-r.top,r.height));const power=calcPower(y,r.height);if(side==='left')leftPower=power;else rightPower=power;updateUI(side,power,r.height);send();}";
+  page += "function bindTrack(el,side){el.addEventListener('touchstart',e=>{for(const t of e.changedTouches){if(side==='left'&&leftTouchId===null){leftTouchId=t.identifier;handleTouch(t,el,side);}if(side==='right'&&rightTouchId===null){rightTouchId=t.identifier;handleTouch(t,el,side);}}});";
+  page += "el.addEventListener('touchmove',e=>{for(const t of e.changedTouches){if(t.identifier===leftTouchId&&side==='left')handleTouch(t,el,side);if(t.identifier===rightTouchId&&side==='right')handleTouch(t,el,side);}});";
+  page += "el.addEventListener('touchend',e=>{for(const t of e.changedTouches){if(t.identifier===leftTouchId&&side==='left'){leftTouchId=null;leftPower=0;updateUI('left',0,el.clientHeight);send();}if(t.identifier===rightTouchId&&side==='right'){rightTouchId=null;rightPower=0;updateUI('right',0,el.clientHeight);send();}}});";
+  page += "el.addEventListener('touchcancel',()=>{leftTouchId=rightTouchId=null;leftPower=rightPower=0;updateUI('left',0,el.clientHeight);updateUI('right',0,el.clientHeight);send();});}";
+  page += "bindTrack(document.getElementById('leftTrack'),'left'); bindTrack(document.getElementById('rightTrack'),'right');";
+  page += "document.getElementById('lightSwitch').addEventListener('change',e=>{fetch(e.target.checked?`${ESP_URL}/ledon`:`${ESP_URL}/ledoff`).catch(()=>{});});";
+  page += "</script></body></html>";
   return httpd_resp_send(req, &page[0], strlen(&page[0]));
 }
 
@@ -294,8 +314,8 @@ static esp_err_t go_handler(httpd_req_t *req) {
 
   if (n > last) {
     last = n;
-    robot_fwd(left, right);
-  }
+   
+  } robot_fwd(left, right);
 
   httpd_resp_set_type(req, "text/html");
   return httpd_resp_send(req, "OK", 2);
