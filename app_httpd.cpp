@@ -76,30 +76,15 @@ void robot_setup() {
 }
 
 void robot_stop() {
-  robot_fwd(150, 150);
+  robot_fwd(0, 0);
 }
 
 void robot_fwd(int right, int left) {
-  if (left < 0) {
-    left = 0;
-  }
-
-  if (right < 0) {
-    right = 0;
-  }
-
-  if (left > 300) {
-    left = 300;
-  }
-
-  if (right > 300) {
-    right = 300;
-  }
-
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, left < 150 ? 150 - left : 0); 
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_5, left >= 150 ? left - 150 : 0);
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, right < 150 ? 150 - right : 0);
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_7, right >= 150 ? right - 150 : 0);
+ 
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, left < 0 ? -left : 0); 
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_5, left >= 0 ? left : 0);
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, right < 0 ? -right : 0);
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_7, right >= 0 ? right : 0);
   ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4);
   ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_5);
   ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6);
