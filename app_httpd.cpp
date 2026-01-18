@@ -72,14 +72,14 @@ void robot_setup() {
   }
 
   pinMode(33, OUTPUT);
-  robot_fwd(150, 150);
+  robot_fwd(0, 0);
 }
 
 void robot_stop() {
   robot_fwd(0, 0);
 }
 
-void robot_fwd(int right, int left) {
+void robot_fwd(int left, int right) {
  
   ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, left < 0 ? -left : 0); 
   ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_5, left >= 0 ? left : 0);
@@ -246,13 +246,13 @@ static esp_err_t index_handler(httpd_req_t *req) {
   page += "</div>";
 
   // JS-контроллер с мультитачем и отправкой на ESP
-  page += "<script>";
+  page += "<script>var start = Date.now(); ";
   page += "function fixHeight(){document.body.style.height=window.innerHeight+'px';} window.addEventListener('resize',fixHeight); window.addEventListener('orientationchange',fixHeight); fixHeight();";
   page += "const ESP_URL='http://" + WiFiAddr + "'; const MAX=150;";
   page += "let leftPower=0,rightPower=0,leftTouchId=null,rightTouchId=null;";
   page += "function calcPower(y,height){let percent=1-y/height;let value=Math.round(percent*MAX*2-MAX);return Math.max(-MAX,Math.min(MAX,value));}";
   page += "function updateUI(side,value,height){const up=document.getElementById(side+'Up');const down=document.getElementById(side+'Down');const val=document.getElementById(side+'Val');val.textContent=value;up.style.height=down.style.height='0px';const px=Math.abs(value)/MAX*(height/2);if(value>0)up.style.height=px+'px';if(value<0)down.style.height=px+'px';}";
-  page += "function send(){fetch(`${ESP_URL}/go?left=${leftPower}&right=${rightPower}`).catch(()=>{});}";
+  page += "let lastSend = 0;const SEND_INTERVAL = 100; function send(){  const now = Date.now(); if( leftPower == 0 && rightPower == 0){now += 101;} if (now - lastSend < SEND_INTERVAL) return;  lastSend = now;  fetch(`${ESP_URL}/go?left=${leftPower}&right=${rightPower}&now=${now-start}`)    .catch(()=>{});}";
   page += "function handleTouch(t,el,side){const r=el.getBoundingClientRect();const y=Math.max(0,Math.min(t.clientY-r.top,r.height));const power=calcPower(y,r.height);if(side==='left')leftPower=power;else rightPower=power;updateUI(side,power,r.height);send();}";
   page += "function bindTrack(el,side){el.addEventListener('touchstart',e=>{for(const t of e.changedTouches){if(side==='left'&&leftTouchId===null){leftTouchId=t.identifier;handleTouch(t,el,side);}if(side==='right'&&rightTouchId===null){rightTouchId=t.identifier;handleTouch(t,el,side);}}});";
   page += "el.addEventListener('touchmove',e=>{for(const t of e.changedTouches){if(t.identifier===leftTouchId&&side==='left')handleTouch(t,el,side);if(t.identifier===rightTouchId&&side==='right')handleTouch(t,el,side);}});";
@@ -299,8 +299,8 @@ static esp_err_t go_handler(httpd_req_t *req) {
 
   if (n > last) {
     last = n;
-   
-  } robot_fwd(left, right);
+    robot_fwd(left, right);
+  }
 
   httpd_resp_set_type(req, "text/html");
   return httpd_resp_send(req, "OK", 2);
