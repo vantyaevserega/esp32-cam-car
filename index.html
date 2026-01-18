@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>ESP32 CAM ROBOT</title>
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #111;
+  overflow: hidden;
+  color: #0f0;
+  font-family: Arial;
+}
+
+#main {
+  display: flex;
+  width: 100vw;
+  height: 100%;
+  align-items: center; /* Центрируем гусеницы по вертикали */
+  justify-content: space-around;
+}
+
+.track {
+  width: 15vw;
+  height: 70%; /* Гусеницы 70% высоты */
+  background: #222;
+  border: 2px solid #0f0;
+  position: relative;
+  touch-action: none;
+    margin-left: 2%;
+    margin-right: 2%;
+}
+
+.center-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #0f0;
+  opacity: .3;
+}
+
+.fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.fill.up {
+  bottom: 50%;
+  background: #0f0;
+}
+
+.fill.down {
+  top: 50%;
+  background: red;
+}
+
+.value {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 20px;
+}
+
+#center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+#center img {
+  max-width: 100%;
+  max-height: calc(100% - 50px);
+  border: 3px solid #0f0;
+}
+
+/* Автомобильный тумблер */
+.toggle-btn {
+  position: absolute;
+  bottom: -70px;  /* Под гусеницей */
+  left: 50%;
+  bottom: -15%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 60px;
+  background: #333;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.7), 0 3px 6px rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.3s, transform 0.2s;
+}
+
+.toggle-btn:active {
+  transform: translateX(-50%) scale(0.95);
+}
+
+.toggle-btn .knob {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: #0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: #111;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+.toggle-btn.on .knob {
+  background: red;
+  box-shadow: 0 2px 10px rgba(255,0,0,0.7);
+}
+</style>
+</head>
+<body>
+
+<div id="main">
+  <!-- Левая гусеница -->
+  <div id="leftTrack" class="track">
+    <div class="value" id="leftVal">0</div>
+    <div class="center-line"></div>
+    <div class="fill up" id="leftUp"></div>
+    <div class="fill down" id="leftDown"></div>
+
+    <!-- Тумблер с значком фар -->
+    <div id="lightSwitch" class="toggle-btn">
+      <div class="knob">💡</div>
+    </div>
+  </div>
+
+  <!-- Центральная часть с камерой -->
+  <div id="center">
+    <img src="http://YOUR_WIFI_ADDR:81/stream">
+  </div>
+
+  <!-- Правая гусеница -->
+  <div id="rightTrack" class="track">
+    <div class="value" id="rightVal">0</div>
+    <div class="center-line"></div>
+    <div class="fill up" id="rightUp"></div>
+    <div class="fill down" id="rightDown"></div>
+  </div>
+</div>
+
+<script>
+const MAX = 150;
+const SEND_INTERVAL = 50;
+const DEADMAN = 300;
+
+let l = 0, r = 0, ll = null, rr = null;
+let lastSend = 0, lastAct = Date.now();
+let lt = null, rt = null;
+let ws = null;
+
+// WebSocket подключение
+function wsConnect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onclose = () => setTimeout(wsConnect, 500);
+}
+wsConnect();
+
+// Вычисление значения движения
+function calc(y, h) {
+  let p = 1 - y / h;
+  let v = Math.round(p * MAX * 2 - MAX);
+  return Math.max(-MAX, Math.min(MAX, v));
+}
+
+// Обновление UI гусениц
+function ui(s, v, h) {
+  let u = document.getElementById(s+'Up');
+  let d = document.getElementById(s+'Down');
+  document.getElementById(s+'Val').textContent = v;
+
+  u.style.height = d.style.height = '0px';
+  let px = Math.abs(v)/MAX*(h/2);
+  if(v>0) u.style.height = px + 'px';
+  if(v<0) d.style.height = px + 'px';
+}
+
+// Отправка данных на сервер
+function sendWS(force=false) {
+  if(!ws || ws.readyState!==1) return;
+  let n = Date.now();
+  if(!force && n-lastSend < SEND_INTERVAL) return;
+  lastSend = n; ll=l; rr=r; lastAct=n;
+  ws.send(l + ',' + r);
+}
+
+// Остановка робота
+function stopNow() {
+  l=0; r=0; ll=rr=null;
+   let rct = rightTrack.getBoundingClientRect();
+    ui('right', r, rct.height);
+      rct = leftTrack.getBoundingClientRect();
+    ui('left', l, rct.height);
+  sendWS(true);
+}
+
+// Привязка касаний к гусеницам
+function bind(el, side) {
+  el.addEventListener('touchstart', e=>{
+    for(let t of e.changedTouches){
+      if(side==='left' && lt===null) lt=t.identifier;
+      if(side==='right' && rt===null) rt=t.identifier;
+    }
+  });
+
+  el.addEventListener('touchmove', e=>{
+    let rct = el.getBoundingClientRect();
+    for(let t of e.changedTouches){
+      if(t.identifier===lt && side==='left'){
+        l = calc(t.clientY - rct.top, rct.height);
+        ui('left', l, rct.height);
+      }
+      if(t.identifier===rt && side==='right'){
+        r = calc(t.clientY - rct.top, rct.height);
+        ui('right', r, rct.height);
+      }
+    }
+  });
+
+  el.addEventListener('touchend', e=>{
+    let stop=false;
+    for(let t of e.changedTouches){
+      if(t.identifier===lt){ lt=null; l=0; stop=true;}
+      if(t.identifier===rt){ rt=null; r=0; stop=true;}
+    }
+    if(stop) stopNow();
+  });
+
+  el.addEventListener('touchcancel', stopNow);
+}
+
+bind(leftTrack,'left');
+bind(rightTrack,'right');
+
+function loop(){ sendWS(); requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+
+window.addEventListener('blur', stopNow);
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) stopNow(); });
+
+// Обработка тумблера
+const lightSwitch = document.getElementById('lightSwitch');
+lightSwitch.addEventListener('click', ()=>{
+  lightSwitch.classList.toggle('on');
+  let url = lightSwitch.classList.contains('on') ? '/ledon' : '/ledoff';
+  fetch(url).catch(()=>{});
+});
+</script>
+
+</body>
+</html>

@@ -226,16 +226,17 @@ static esp_err_t index_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
 
   String page;
-  page.reserve(9000);
+  page.reserve(14000);
 
-  page += "<!DOCTYPE html><html lang='ru'><head><meta charset='UTF-8'>";
+  page += "<!DOCTYPE html><html lang='ru'><head>";
+  page += "<meta charset='UTF-8'>";
   page += "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0,user-scalable=no'>";
   page += "<title>ESP32 CAM ROBOT</title>";
 
   page += "<style>";
   page += "html,body{margin:0;padding:0;width:100%;height:100%;background:#111;overflow:hidden;color:#0f0;font-family:Arial}";
-  page += "#main{display:flex;width:100vw;height:100%}";
-  page += ".track{width:15vw;height:100%;background:#222;border:2px solid #0f0;position:relative;touch-action:none}";
+  page += "#main{display:flex;width:100vw;height:100%;align-items:center;justify-content:space-around}";
+  page += ".track{width:15vw;height:70%;background:#222;border:2px solid #0f0;position:relative;touch-action:none;margin-left:2%;margin-right:2%}";
   page += ".center-line{position:absolute;top:50%;left:0;right:0;height:2px;background:#0f0;opacity:.3}";
   page += ".fill{position:absolute;left:0;right:0}";
   page += ".fill.up{bottom:50%;background:#0f0}";
@@ -243,117 +244,98 @@ static esp_err_t index_handler(httpd_req_t *req) {
   page += ".value{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:20px}";
   page += "#center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}";
   page += "#center img{max-width:100%;max-height:calc(100% - 50px);border:3px solid #0f0}";
+
+  page += ".toggle-btn{position:absolute;left:50%;bottom:-15%;transform:translateX(-50%);";
+  page += "width:60px;height:60px;background:#333;border-radius:50%;cursor:pointer;";
+  page += "box-shadow:inset 0 2px 6px rgba(0,0,0,.7),0 3px 6px rgba(0,0,0,.5);";
+  page += "display:flex;align-items:center;justify-content:center;transition:background .3s,transform .2s}";
+  page += ".toggle-btn:active{transform:translateX(-50%) scale(.95)}";
+  page += ".toggle-btn .knob{width:50px;height:50px;border-radius:50%;background:#0f0;";
+  page += "display:flex;align-items:center;justify-content:center;font-size:24px;color:#111;";
+  page += "box-shadow:0 2px 6px rgba(0,0,0,.5);transition:background .3s,box-shadow .3s}";
+  page += ".toggle-btn.on .knob{background:red;box-shadow:0 2px 10px rgba(255,0,0,.7)}";
   page += "</style></head><body>";
 
   page += "<div id='main'>";
-  page += "<div id='leftTrack' class='track'><div class='value' id='leftVal'>0</div><div class='center-line'></div><div class='fill up' id='leftUp'></div><div class='fill down' id='leftDown'></div></div>";
-  page += "<div id='center'><img src='http://" + WiFiAddr + ":81/stream'><label><input type='checkbox' id='lightSwitch'> Свет</label></div>";
-  page += "<div id='rightTrack' class='track'><div class='value' id='rightVal'>0</div><div class='center-line'></div><div class='fill up' id='rightUp'></div><div class='fill down' id='rightDown'></div></div>";
+
+  page += "<div id='leftTrack' class='track'>";
+  page += "<div class='value' id='leftVal'>0</div>";
+  page += "<div class='center-line'></div>";
+  page += "<div class='fill up' id='leftUp'></div>";
+  page += "<div class='fill down' id='leftDown'></div>";
+  page += "<div id='lightSwitch' class='toggle-btn'><div class='knob'>💡</div></div>";
   page += "</div>";
 
-  // ====== JS ======
-page += "<script>";
-page += "const MAX=150;";
-page += "const SEND_INTERVAL=50;";
-page += "const DEADMAN=300;";
+  page += "<div id='center'>";
+  page += "<img src='http://" + WiFiAddr + ":81/stream'>";
+  page += "</div>";
 
-page += "let l=0,r=0,ll=null,rr=null;";
-page += "let lastSend=0,lastAct=Date.now();";
-page += "let lt=null,rt=null;";
-page += "let ws=null;";
+  page += "<div id='rightTrack' class='track'>";
+  page += "<div class='value' id='rightVal'>0</div>";
+  page += "<div class='center-line'></div>";
+  page += "<div class='fill up' id='rightUp'></div>";
+  page += "<div class='fill down' id='rightDown'></div>";
+  page += "</div>";
 
-page += "function wsConnect(){";
-page += "ws=new WebSocket(`ws://${location.host}/ws`);";
-page += "ws.onclose=()=>setTimeout(wsConnect,500);";
-page += "}";
-page += "wsConnect();";
+  page += "</div>";
 
-page += "function calc(y,h){";
-page += "let p=1-y/h;";
-page += "let v=Math.round(p*MAX*2-MAX);";
-page += "return Math.max(-MAX,Math.min(MAX,v));";
-page += "}";
+  page += "<script>";
+  page += "const MAX=150,SEND_INTERVAL=50,DEADMAN=300;";
+  page += "let l=0,r=0,ll=null,rr=null,lastSend=0,lastAct=Date.now(),lt=null,rt=null,ws=null;";
 
-page += "function ui(s,v,h){";
-page += "let u=document.getElementById(s+'Up');";
-page += "let d=document.getElementById(s+'Down');";
-page += "document.getElementById(s+'Val').textContent=v;";
-page += "u.style.height=d.style.height='0px';";
-page += "let px=Math.abs(v)/MAX*(h/2);";
-page += "if(v>0)u.style.height=px+'px';";
-page += "if(v<0)d.style.height=px+'px';";
-page += "}";
+  page += "function wsConnect(){ws=new WebSocket(`ws://${location.host}/ws`);";
+  page += "ws.onclose=()=>setTimeout(wsConnect,500);}wsConnect();";
 
-page += "function sendWS(force=false){";
-page += "if(!ws||ws.readyState!==1)return;";
-page += "let n=Date.now();";
-page += "if(!force&&n-lastSend<SEND_INTERVAL)return;";
-page += "if(!force&&l===ll&&r===rr)return;";
-page += "lastSend=n;ll=l;rr=r;lastAct=n;";
-page += "ws.send(l+','+r);";
-page += "}";
+  page += "function calc(y,h){let p=1-y/h;let v=Math.round(p*MAX*2-MAX);";
+  page += "return Math.max(-MAX,Math.min(MAX,v));}";
 
-page += "function stopNow(){";
-page += "l=0;r=0;ll=rr=null;";
-page += "sendWS(true);";
-page += "}";
+  page += "function ui(s,v,h){let u=document.getElementById(s+'Up');";
+  page += "let d=document.getElementById(s+'Down');";
+  page += "document.getElementById(s+'Val').textContent=v;";
+  page += "u.style.height=d.style.height='0px';";
+  page += "let px=Math.abs(v)/MAX*(h/2);";
+  page += "if(v>0)u.style.height=px+'px';";
+  page += "if(v<0)d.style.height=px+'px';}";
 
-page += "setInterval(()=>{";
-page += "if(Date.now()-lastAct>DEADMAN){";
-page += "if(l||r)stopNow();";
-page += "}},100);";
+  page += "function sendWS(force=false){";
+  page += "if(!ws||ws.readyState!==1)return;";
+  page += "let n=Date.now();";
+  page += "if(!force&&n-lastSend<SEND_INTERVAL)return;";
+  page += "lastSend=n;ll=l;rr=r;lastAct=n;";
+  page += "ws.send(l+','+r);}";
 
-page += "function bind(el,side){";
+  page += "function stopNow(){l=0;r=0;ll=rr=null;";
+  page += "let rc=rightTrack.getBoundingClientRect();ui('right',r,rc.height);";
+  page += "rc=leftTrack.getBoundingClientRect();ui('left',l,rc.height);";
+  page += "sendWS(true);}";
 
-page += "el.addEventListener('touchstart',e=>{";
-page += "for(let t of e.changedTouches){";
-page += "if(side==='left'&&lt===null)lt=t.identifier;";
-page += "if(side==='right'&&rt===null)rt=t.identifier;";
-page += "}});";
+  page += "function bind(el,side){";
+  page += "el.addEventListener('touchstart',e=>{for(let t of e.changedTouches){";
+  page += "if(side==='left'&&lt===null)lt=t.identifier;";
+  page += "if(side==='right'&&rt===null)rt=t.identifier;}});";
 
-page += "el.addEventListener('touchmove',e=>{";
-page += "let rct=el.getBoundingClientRect();";
-page += "for(let t of e.changedTouches){";
-page += "if(t.identifier===lt&&side==='left'){";
-page += "l=calc(t.clientY-rct.top,rct.height);";
-page += "ui('left',l,rct.height);}";
-page += "if(t.identifier===rt&&side==='right'){";
-page += "r=calc(t.clientY-rct.top,rct.height);";
-page += "ui('right',r,rct.height);}";
-page += "}});";
+  page += "el.addEventListener('touchmove',e=>{let rct=el.getBoundingClientRect();";
+  page += "for(let t of e.changedTouches){";
+  page += "if(t.identifier===lt&&side==='left'){l=calc(t.clientY-rct.top,rct.height);ui('left',l,rct.height);}"; 
+  page += "if(t.identifier===rt&&side==='right'){r=calc(t.clientY-rct.top,rct.height);ui('right',r,rct.height);}}});";
 
-page += "el.addEventListener('touchend',e=>{";
-page += "let stop=false;";
-page += "for(let t of e.changedTouches){";
-page += "if(t.identifier===lt){lt=null;l=0;stop=true;}";
-page += "if(t.identifier===rt){rt=null;r=0;stop=true;}";
-page += "}";
-page += "if(stop)stopNow();";
-page += "});";
+  page += "el.addEventListener('touchend',e=>{let stop=false;";
+  page += "for(let t of e.changedTouches){";
+  page += "if(t.identifier===lt){lt=null;l=0;stop=true;}";
+  page += "if(t.identifier===rt){rt=null;r=0;stop=true;}}";
+  page += "if(stop)stopNow();});";
 
-page += "el.addEventListener('touchcancel',stopNow);";
-page += "}";
+  page += "el.addEventListener('touchcancel',stopNow);}";
 
-page += "bind(leftTrack,'left');";
-page += "bind(rightTrack,'right');";
+  page += "bind(leftTrack,'left');bind(rightTrack,'right');";
+  page += "function loop(){sendWS();requestAnimationFrame(loop);}loop();";
+  page += "window.addEventListener('blur',stopNow);";
+  page += "document.addEventListener('visibilitychange',()=>{if(document.hidden)stopNow();});";
 
-page += "function loop(){";
-page += "sendWS();";
-page += "requestAnimationFrame(loop);";
-page += "}";
-page += "requestAnimationFrame(loop);";
-
-page += "window.addEventListener('blur',stopNow);";
-page += "document.addEventListener('visibilitychange',()=>{";
-page += "if(document.hidden)stopNow();";
-page += "});";
-
-page += "lightSwitch.onchange=e=>{";
-page += "fetch(e.target.checked?'/ledon':'/ledoff').catch(()=>{});";
-page += "};";
-
-page += "</script>";
-
+  page += "const sw=document.getElementById('lightSwitch');";
+  page += "sw.addEventListener('click',()=>{sw.classList.toggle('on');";
+  page += "fetch(sw.classList.contains('on')?'/ledon':'/ledoff').catch(()=>{});});";
+  page += "</script>";
 
   page += "</body></html>";
 
