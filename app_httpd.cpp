@@ -18,9 +18,12 @@ const int motorPWMChannnel = 8;
 const int lresolution = 8;
 volatile unsigned int motor_speed = 100;
 void robot_setup();
+void movement_watchdog();
 void robot_fwd(int left, int right);
 volatile unsigned long previous_time = 0;
 volatile unsigned long move_interval = 250;
+static int64_t last_ws_cmd_us = 0;
+static const int64_t WS_TIMEOUT_US = 300000; // 300 мс
 unsigned int get_speed(unsigned int sp) {
   return map(sp, 0, 100, 0, 255);
 }
@@ -80,8 +83,8 @@ void robot_stop() {
 }
 
 void robot_fwd(int left, int right) {
- 
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, left < 0 ? -left : 0); 
+
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, left < 0 ? -left : 0);
   ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_5, left >= 0 ? left : 0);
   ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, right < 0 ? -right : 0);
   ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_7, right >= 0 ? right : 0);
@@ -221,89 +224,140 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 
 static esp_err_t index_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
-  String page = "";
-  page += "<!DOCTYPE html><html lang='ru'><head><meta charset='UTF-8'><title>Управление</title>";
-  page += "<meta name='viewport' content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'>";
+
+  String page;
+  page.reserve(9000);
+
+  page += "<!DOCTYPE html><html lang='ru'><head><meta charset='UTF-8'>";
+  page += "<meta name='viewport' content='width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0,user-scalable=no'>";
+  page += "<title>ESP32 CAM ROBOT</title>";
+
   page += "<style>";
-  page += "html, body{margin:0;padding:0;width:100%;height:100%;background:#111;overflow:hidden;touch-action:none;color:#0f0;font-family:Arial,sans-serif;}";
-  page += "#main{display:flex;width:100vw;height:100%;}";
-  page += ".track{width:15vw;height:100%;background:#222;border:2px solid #0f0;position:relative;touch-action:none;box-sizing:border-box;}";
-  page += ".center-line{position:absolute;top:50%;left:0;right:0;height:2px;background:#0f0;opacity:0.3;}";
-  page += ".fill{position:absolute;left:0;right:0;}";
-  page += ".fill.up{bottom:50%;background:#0f0;}";
-  page += ".fill.down{top:50%;background:red;}";
-  page += ".value{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:22px;}";
-  page += "#center{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;}";
-  page += "#center img{max-width:100%;max-height:calc(100% - 60px);border:3px solid #0f0;}";
-  page += ".switch{margin-top:6px;font-size:18px;}";
-  page += ".switch input{width:60px;height:30px;}";
+  page += "html,body{margin:0;padding:0;width:100%;height:100%;background:#111;overflow:hidden;color:#0f0;font-family:Arial}";
+  page += "#main{display:flex;width:100vw;height:100%}";
+  page += ".track{width:15vw;height:100%;background:#222;border:2px solid #0f0;position:relative;touch-action:none}";
+  page += ".center-line{position:absolute;top:50%;left:0;right:0;height:2px;background:#0f0;opacity:.3}";
+  page += ".fill{position:absolute;left:0;right:0}";
+  page += ".fill.up{bottom:50%;background:#0f0}";
+  page += ".fill.down{top:50%;background:red}";
+  page += ".value{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:20px}";
+  page += "#center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}";
+  page += "#center img{max-width:100%;max-height:calc(100% - 50px);border:3px solid #0f0}";
   page += "</style></head><body>";
-  
+
   page += "<div id='main'>";
   page += "<div id='leftTrack' class='track'><div class='value' id='leftVal'>0</div><div class='center-line'></div><div class='fill up' id='leftUp'></div><div class='fill down' id='leftDown'></div></div>";
-  page += "<div id='center'><img src='http://" + WiFiAddr + ":81/stream'><div class='switch'><label>Свет</label><input type='checkbox' id='lightSwitch'></div></div>";
+  page += "<div id='center'><img src='http://" + WiFiAddr + ":81/stream'><label><input type='checkbox' id='lightSwitch'> Свет</label></div>";
   page += "<div id='rightTrack' class='track'><div class='value' id='rightVal'>0</div><div class='center-line'></div><div class='fill up' id='rightUp'></div><div class='fill down' id='rightDown'></div></div>";
   page += "</div>";
 
-  // JS-контроллер с мультитачем и отправкой на ESP
-  page += "<script>var start = Date.now(); ";
-  page += "function fixHeight(){document.body.style.height=window.innerHeight+'px';} window.addEventListener('resize',fixHeight); window.addEventListener('orientationchange',fixHeight); fixHeight();";
-  page += "const ESP_URL='http://" + WiFiAddr + "'; const MAX=150;";
-  page += "let leftPower=0,rightPower=0,leftTouchId=null,rightTouchId=null;";
-  page += "function calcPower(y,height){let percent=1-y/height;let value=Math.round(percent*MAX*2-MAX);return Math.max(-MAX,Math.min(MAX,value));}";
-  page += "function updateUI(side,value,height){const up=document.getElementById(side+'Up');const down=document.getElementById(side+'Down');const val=document.getElementById(side+'Val');val.textContent=value;up.style.height=down.style.height='0px';const px=Math.abs(value)/MAX*(height/2);if(value>0)up.style.height=px+'px';if(value<0)down.style.height=px+'px';}";
-  page += "let lastSend = 0;const SEND_INTERVAL = 100; function send(){  const now = Date.now(); if( leftPower == 0 && rightPower == 0){now += 101;} if (now - lastSend < SEND_INTERVAL) return;  lastSend = now;  fetch(`${ESP_URL}/go?left=${leftPower}&right=${rightPower}&now=${now-start}`)    .catch(()=>{});}";
-  page += "function handleTouch(t,el,side){const r=el.getBoundingClientRect();const y=Math.max(0,Math.min(t.clientY-r.top,r.height));const power=calcPower(y,r.height);if(side==='left')leftPower=power;else rightPower=power;updateUI(side,power,r.height);send();}";
-  page += "function bindTrack(el,side){el.addEventListener('touchstart',e=>{for(const t of e.changedTouches){if(side==='left'&&leftTouchId===null){leftTouchId=t.identifier;handleTouch(t,el,side);}if(side==='right'&&rightTouchId===null){rightTouchId=t.identifier;handleTouch(t,el,side);}}});";
-  page += "el.addEventListener('touchmove',e=>{for(const t of e.changedTouches){if(t.identifier===leftTouchId&&side==='left')handleTouch(t,el,side);if(t.identifier===rightTouchId&&side==='right')handleTouch(t,el,side);}});";
-  page += "el.addEventListener('touchend',e=>{for(const t of e.changedTouches){if(t.identifier===leftTouchId&&side==='left'){leftTouchId=null;leftPower=0;updateUI('left',0,el.clientHeight);send();}if(t.identifier===rightTouchId&&side==='right'){rightTouchId=null;rightPower=0;updateUI('right',0,el.clientHeight);send();}}});";
-  page += "el.addEventListener('touchcancel',()=>{leftTouchId=rightTouchId=null;leftPower=rightPower=0;updateUI('left',0,el.clientHeight);updateUI('right',0,el.clientHeight);send();});}";
-  page += "bindTrack(document.getElementById('leftTrack'),'left'); bindTrack(document.getElementById('rightTrack'),'right');";
-  page += "document.getElementById('lightSwitch').addEventListener('change',e=>{fetch(e.target.checked?`${ESP_URL}/ledon`:`${ESP_URL}/ledoff`).catch(()=>{});});";
-  page += "</script></body></html>";
-  return httpd_resp_send(req, &page[0], strlen(&page[0]));
-}
+  // ====== JS ======
+page += "<script>";
+page += "const MAX=150;";
+page += "const SEND_INTERVAL=50;";
+page += "const DEADMAN=300;";
 
-static esp_err_t go_handler(httpd_req_t *req) {
-  Serial.println("Go");
+page += "let l=0,r=0,ll=null,rr=null;";
+page += "let lastSend=0,lastAct=Date.now();";
+page += "let lt=null,rt=null;";
+page += "let ws=null;";
 
-  char query[128];
-  char param[32];
-  int left = 150;
-  int right = 150;
-  long long n;
+page += "function wsConnect(){";
+page += "ws=new WebSocket(`ws://${location.host}/ws`);";
+page += "ws.onclose=()=>setTimeout(wsConnect,500);";
+page += "}";
+page += "wsConnect();";
 
-  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-    Serial.printf("Query string: %s\n", query);
+page += "function calc(y,h){";
+page += "let p=1-y/h;";
+page += "let v=Math.round(p*MAX*2-MAX);";
+page += "return Math.max(-MAX,Math.min(MAX,v));";
+page += "}";
 
-    if (httpd_query_key_value(query, "left", param, sizeof(param)) == ESP_OK) {
-      left = atoi(param);
+page += "function ui(s,v,h){";
+page += "let u=document.getElementById(s+'Up');";
+page += "let d=document.getElementById(s+'Down');";
+page += "document.getElementById(s+'Val').textContent=v;";
+page += "u.style.height=d.style.height='0px';";
+page += "let px=Math.abs(v)/MAX*(h/2);";
+page += "if(v>0)u.style.height=px+'px';";
+page += "if(v<0)d.style.height=px+'px';";
+page += "}";
 
-      Serial.printf("left: %d\n", left);
-    }
+page += "function sendWS(force=false){";
+page += "if(!ws||ws.readyState!==1)return;";
+page += "let n=Date.now();";
+page += "if(!force&&n-lastSend<SEND_INTERVAL)return;";
+page += "if(!force&&l===ll&&r===rr)return;";
+page += "lastSend=n;ll=l;rr=r;lastAct=n;";
+page += "ws.send(l+','+r);";
+page += "}";
 
-    // Параметр delay (пример числового параметра)
-    if (httpd_query_key_value(query, "right", param, sizeof(param)) == ESP_OK) {
-      right = atoi(param);
+page += "function stopNow(){";
+page += "l=0;r=0;ll=rr=null;";
+page += "sendWS(true);";
+page += "}";
 
-      Serial.printf("right: %d\n", right);
-    }
+page += "setInterval(()=>{";
+page += "if(Date.now()-lastAct>DEADMAN){";
+page += "if(l||r)stopNow();";
+page += "}},100);";
 
-    // Параметр delay (пример числового параметра)
-    if (httpd_query_key_value(query, "now", param, sizeof(param)) == ESP_OK) {
-      n = atoll(param);
+page += "function bind(el,side){";
 
-      Serial.printf("now: %d\n", n);
-    }
-  }
+page += "el.addEventListener('touchstart',e=>{";
+page += "for(let t of e.changedTouches){";
+page += "if(side==='left'&&lt===null)lt=t.identifier;";
+page += "if(side==='right'&&rt===null)rt=t.identifier;";
+page += "}});";
 
-  if (n > last) {
-    last = n;
-    robot_fwd(left, right);
-  }
+page += "el.addEventListener('touchmove',e=>{";
+page += "let rct=el.getBoundingClientRect();";
+page += "for(let t of e.changedTouches){";
+page += "if(t.identifier===lt&&side==='left'){";
+page += "l=calc(t.clientY-rct.top,rct.height);";
+page += "ui('left',l,rct.height);}";
+page += "if(t.identifier===rt&&side==='right'){";
+page += "r=calc(t.clientY-rct.top,rct.height);";
+page += "ui('right',r,rct.height);}";
+page += "}});";
 
-  httpd_resp_set_type(req, "text/html");
-  return httpd_resp_send(req, "OK", 2);
+page += "el.addEventListener('touchend',e=>{";
+page += "let stop=false;";
+page += "for(let t of e.changedTouches){";
+page += "if(t.identifier===lt){lt=null;l=0;stop=true;}";
+page += "if(t.identifier===rt){rt=null;r=0;stop=true;}";
+page += "}";
+page += "if(stop)stopNow();";
+page += "});";
+
+page += "el.addEventListener('touchcancel',stopNow);";
+page += "}";
+
+page += "bind(leftTrack,'left');";
+page += "bind(rightTrack,'right');";
+
+page += "function loop(){";
+page += "sendWS();";
+page += "requestAnimationFrame(loop);";
+page += "}";
+page += "requestAnimationFrame(loop);";
+
+page += "window.addEventListener('blur',stopNow);";
+page += "document.addEventListener('visibilitychange',()=>{";
+page += "if(document.hidden)stopNow();";
+page += "});";
+
+page += "lightSwitch.onchange=e=>{";
+page += "fetch(e.target.checked?'/ledon':'/ledoff').catch(()=>{});";
+page += "};";
+
+page += "</script>";
+
+
+  page += "</body></html>";
+
+  return httpd_resp_send(req, page.c_str(), page.length());
 }
 
 static esp_err_t ledon_handler(httpd_req_t *req) {
@@ -317,17 +371,40 @@ static esp_err_t ledoff_handler(httpd_req_t *req) {
   Serial.println("LED OFF");
   httpd_resp_set_type(req, "text/html");
   return httpd_resp_send(req, "OK", 2);
+}void movement_watchdog() {
+  if (esp_timer_get_time() - last_ws_cmd_us > WS_TIMEOUT_US) {
+    robot_stop();
+  }
 }
+static esp_err_t ws_handler(httpd_req_t *req) {
+  if (req->method == HTTP_GET) {
+    return ESP_OK; // handshake
+  }
 
+  httpd_ws_frame_t frame;
+  memset(&frame, 0, sizeof(frame));
+  frame.type = HTTPD_WS_TYPE_TEXT;
+
+  esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
+  if (ret != ESP_OK) return ret;
+
+  char buf[32];
+  frame.payload = (uint8_t*)buf;
+  ret = httpd_ws_recv_frame(req, &frame, frame.len);
+  if (ret != ESP_OK) return ret;
+
+  buf[frame.len] = 0;
+
+  int left = 0, right = 0;
+  if (sscanf(buf, "%d,%d", &left, &right) == 2) {
+    last_ws_cmd_us = esp_timer_get_time();
+    robot_fwd(left, right);
+  }
+
+  return ESP_OK;
+}
 void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
-  httpd_uri_t go_uri = {
-    .uri = "/go",
-    .method = HTTP_GET,
-    .handler = go_handler,
-    .user_ctx = NULL
-  };
 
   httpd_uri_t ledon_uri = {
     .uri = "/ledon",
@@ -350,6 +427,14 @@ void startCameraServer() {
     .user_ctx = NULL
   };
 
+  httpd_uri_t ws_uri = {
+  .uri = "/ws",
+  .method = HTTP_GET,
+  .handler = ws_handler,
+  .user_ctx = NULL,
+  .is_websocket = true
+};
+
   httpd_uri_t stream_uri = {
     .uri = "/stream",
     .method = HTTP_GET,
@@ -361,9 +446,9 @@ void startCameraServer() {
   Serial.printf("Starting web server on port: '%d'", config.server_port);
   if (httpd_start(&camera_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(camera_httpd, &index_uri);
-    httpd_register_uri_handler(camera_httpd, &go_uri);
     httpd_register_uri_handler(camera_httpd, &ledon_uri);
     httpd_register_uri_handler(camera_httpd, &ledoff_uri);
+    httpd_register_uri_handler(camera_httpd, &ws_uri);  
   }
 
   config.server_port += 1;
